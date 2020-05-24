@@ -8,10 +8,6 @@
 #include <assert.h>
 #endif
 
-#if (!defined(KMOD_MEMMAP))
-#define USE_PAGECACHE
-#endif
-
 /* For how long should the cached page be valid */
 #ifndef VT_CACHE_TIME_MS
 #define VT_CACHE_TIME_MS 1
@@ -19,11 +15,7 @@
 
 static size_t vtCacheTimeMS = VT_CACHE_TIME_MS;
 
-#define VT_CACHE_TIME_NS vtCacheTimeMS * 1000000ll
-
-/*
-  This is used to cache the pages touched last bu reads of VTranslate, this increases the performance of external mode by at least 2x for multiple consequitive reads in common area. Cached page expires after a set interval which should be small enough not to cause very serious harm
-*/
+#define VT_CACHE_TIME_NS (vtCacheTimeMS * 1000000ll)
 
 // This makes the cache fit in 12 pages
 #ifndef TLB_SIZE
@@ -43,18 +35,9 @@ typedef struct {
 	struct timespec curTime;
 	struct timespec entryTimes[TLB_SIZE];
 	tlbentry_t entries[TLB_SIZE];
-
-#ifdef USE_PAGECACHE
-	uint64_t pageCachePage[4];
-	char pageCache[4][0x1000];
-	struct timespec pageCacheTime[4];
-#endif
 } _tlb_t;
 
 static __thread _tlb_t vtTlb = {
-#ifdef USE_PAGECACHE
-	.pageCachePage = {0, 0, 0, 0},
-#endif
 	.tlbHits = 0,
 	.tlbMisses = 0
 };
@@ -94,8 +77,7 @@ ssize_t VMemRead(const ProcessData* data, uint64_t dirBase, uint64_t local, uint
 	return ret;
 }
 
-ssize_t VMemWrite(const ProcessData* data, uint64_t dirBase, uint64_t local, uint64_t remote, size_t size)
-{
+ssize_t VMemWrite(const ProcessData* data, uint64_t dirBase, uint64_t local, uint64_t remote, size_t size) {
 	if ((remote >> 12ull) == ((remote + size) >> 12ull))
 		return MemWrite(data, local, VTranslate(data, dirBase, remote), size);
 
@@ -115,32 +97,27 @@ ssize_t VMemWrite(const ProcessData* data, uint64_t dirBase, uint64_t local, uin
 	return ret;
 }
 
-uint64_t VMemReadU64(const ProcessData* data, uint64_t dirBase, uint64_t remote)
-{
+uint64_t VMemReadU64(const ProcessData* data, uint64_t dirBase, uint64_t remote) {
 	uint64_t dest;
 	MemRead(data, (uint64_t)&dest, VTranslate(data, dirBase, remote), sizeof(uint64_t));
 	return dest;
 }
 
-ssize_t VMemWriteU64(const ProcessData* data, uint64_t dirBase, uint64_t remote, uint64_t value)
-{
+ssize_t VMemWriteU64(const ProcessData* data, uint64_t dirBase, uint64_t remote, uint64_t value) {
 	return MemRead(data, (uint64_t)&value, VTranslate(data, dirBase, remote), sizeof(uint64_t));
 }
 
-uint64_t MemReadU64(const ProcessData* data, uint64_t remote)
-{
+uint64_t MemReadU64(const ProcessData* data, uint64_t remote) {
 	uint64_t dest;
 	MemRead(data, (uint64_t)&dest, remote, sizeof(uint64_t));
 	return dest;
 }
 
-ssize_t MemWriteU64(const ProcessData* data, uint64_t remote, uint64_t value)
-{
+ssize_t MemWriteU64(const ProcessData* data, uint64_t remote, uint64_t value) {
 	return MemRead(data, (uint64_t)&value, remote, sizeof(uint64_t));
 }
 
-ssize_t VMemReadMul(const ProcessData* data, uint64_t dirBase, RWInfo* info, size_t num)
-{
+ssize_t VMemReadMul(const ProcessData* data, uint64_t dirBase, RWInfo* info, size_t num) {
 	int dataCount = CalculateDataCount(info, num);
 	RWInfo readInfoStack[MAX_BATCHED_RW];
 	RWInfo* readInfo = readInfoStack;
@@ -157,8 +134,7 @@ ssize_t VMemReadMul(const ProcessData* data, uint64_t dirBase, RWInfo* info, siz
 	return ret;
 }
 
-ssize_t VMemWriteMul(const ProcessData* data, uint64_t dirBase, RWInfo* info, size_t num)
-{
+ssize_t VMemWriteMul(const ProcessData* data, uint64_t dirBase, RWInfo* info, size_t num) {
 	int dataCount = CalculateDataCount(info, num);
 	RWInfo writeInfoStack[MAX_BATCHED_RW];
 	RWInfo* writeInfo = writeInfoStack;
@@ -175,8 +151,7 @@ ssize_t VMemWriteMul(const ProcessData* data, uint64_t dirBase, RWInfo* info, si
 	return ret;
 }
 
-uint64_t VTranslate(const ProcessData* data, uint64_t dirBase, uint64_t address)
-{
+uint64_t VTranslate(const ProcessData* data, uint64_t dirBase, uint64_t address) {
 	dirBase &= ~0xf;
 
 	_tlb_t* tlb = &vtTlb;
@@ -193,23 +168,19 @@ uint64_t VTranslate(const ProcessData* data, uint64_t dirBase, uint64_t address)
 	return cachedVal;
 }
 
-void SetMemCacheTime(size_t newTime)
-{
+void SetMemCacheTime(size_t newTime) {
 	vtCacheTimeMS = newTime;
 }
 
-size_t GetDefaultMemCacheTime(void)
-{
+size_t GetDefaultMemCacheTime(void) {
 	return VT_CACHE_TIME_MS;
 }
 
-tlb_t* GetTlb(void)
-{
+tlb_t* GetTlb(void) {
 	return (tlb_t*)&vtTlb;
 }
 
-void VerifyTlb(const ProcessData* data, tlb_t* tlbIn, size_t splitCount, size_t splitID)
-{
+void VerifyTlb(const ProcessData* data, tlb_t* tlbIn, size_t splitCount, size_t splitID) {
 	splitID = splitID % splitCount;
 
 	_tlb_t* tlb = (_tlb_t*)tlbIn;
@@ -232,8 +203,7 @@ void VerifyTlb(const ProcessData* data, tlb_t* tlbIn, size_t splitCount, size_t 
 		tlb->entryTimes[i] = time;
 }
 
-void FlushTlb(tlb_t* tlb)
-{
+void FlushTlb(tlb_t* tlb) {
 	struct timespec time = {
 		.tv_nsec = 0,
 		.tv_sec = 0
@@ -244,47 +214,27 @@ void FlushTlb(tlb_t* tlb)
 }
 
 /* Static functions */
-
-static size_t GetTlbIndex(uint64_t address)
-{
+static size_t GetTlbIndex(uint64_t address) {
 	return (address >> 12l) % TLB_SIZE;
 }
 
-static struct timespec GetTime(void)
-{
+static struct timespec GetTime(void) {
 	struct timespec time;
 	clock_gettime(CLOCK_MONOTONIC_COARSE, &time);
 	return time;
 }
 
-static void VtUpdateCurTime(_tlb_t* tlb)
-{
+static void VtUpdateCurTime(_tlb_t* tlb) {
 	tlb->curTime = GetTime();
 }
 
-static uint64_t VtMemReadU64(const ProcessData* data, _tlb_t* tlb, size_t idx, uint64_t address)
-{
-#ifdef USE_PAGECACHE
-	uint64_t page = address & ~0xfff;
-
-	uint64_t timeDiff = (tlb->curTime.tv_sec - tlb->pageCacheTime[idx].tv_sec) * (uint64_t)1e9 + (tlb->curTime.tv_nsec - tlb->pageCacheTime[idx].tv_nsec);
-
-	if (tlb->pageCachePage[idx] != page || timeDiff >= VT_CACHE_TIME_NS) {
-		MemRead(data, (uint64_t)tlb->pageCache[idx], page, 0x1000);
-		tlb->pageCachePage[idx] = page;
-		tlb->pageCacheTime[idx] = tlb->curTime;
-	}
-
-	return *(uint64_t*)(void*)(tlb->pageCache[idx] + (address & 0xfff));
-#else
+static uint64_t VtMemReadU64(const ProcessData* data, _tlb_t* tlb, size_t idx, uint64_t address) {
 	(void)tlb;
 	(void)idx;
 	return MemReadU64(data, address);
-#endif
 }
 
-static uint64_t VtCheckCachedResult(_tlb_t* tlb, uint64_t inAddress, uint64_t dirBase)
-{
+static uint64_t VtCheckCachedResult(_tlb_t* tlb, uint64_t inAddress, uint64_t dirBase) {
 	VtUpdateCurTime(tlb);
 	size_t index = GetTlbIndex(inAddress);
 	tlbentry_t tlbEntry = tlb->entries[index];
@@ -300,8 +250,7 @@ static uint64_t VtCheckCachedResult(_tlb_t* tlb, uint64_t inAddress, uint64_t di
 	return 0;
 }
 
-static void VtUpdateCachedResult(_tlb_t* tlb, uint64_t inAddress, uint64_t address, uint64_t dirBase)
-{
+static void VtUpdateCachedResult(_tlb_t* tlb, uint64_t inAddress, uint64_t address, uint64_t dirBase) {
 	size_t index = GetTlbIndex(inAddress);
 	tlb->entryTimes[index] = tlb->curTime;
 	tlb->entries[index] = (tlbentry_t) {
@@ -312,8 +261,7 @@ static void VtUpdateCachedResult(_tlb_t* tlb, uint64_t inAddress, uint64_t addre
 	tlb->tlbMisses++;
 }
 
-static uint64_t VTranslateInternal(const ProcessData* data, _tlb_t* tlb, uint64_t dirBase, uint64_t address)
-{
+static uint64_t VTranslateInternal(const ProcessData* data, _tlb_t* tlb, uint64_t dirBase, uint64_t address) {
 	uint64_t pageOffset = address & ~(~0ul << PAGE_OFFSET_SIZE);
 	uint64_t pte = ((address >> 12) & (0x1ffll));
 	uint64_t pt = ((address >> 21) & (0x1ffll));
@@ -349,9 +297,8 @@ static uint64_t VTranslateInternal(const ProcessData* data, _tlb_t* tlb, uint64_
 }
 
 
-static int CalculateDataCount(RWInfo* info, size_t count)
-{
-	int ret = 0;
+static int CalculateDataCount(RWInfo* info, size_t count) {
+	uint64_t ret = 0;
 
 	for (size_t i = 0; i < count; i++)
 		ret += 1 + ((info[i].remote + info[i].size - 1) >> 12ull) - (info[i].remote >> 12ull);
@@ -359,8 +306,7 @@ static int CalculateDataCount(RWInfo* info, size_t count)
 	return ret;
 }
 
-static int FillRWInfoMul(const ProcessData* data, uint64_t dirBase, RWInfo* origData, RWInfo* info, size_t count)
-{
+static int FillRWInfoMul(const ProcessData* data, uint64_t dirBase, RWInfo* origData, RWInfo* info, size_t count) {
 	int ret = 0;
 
 	for (size_t i = 0; i < count; i++) {
@@ -371,8 +317,7 @@ static int FillRWInfoMul(const ProcessData* data, uint64_t dirBase, RWInfo* orig
 	return ret;
 }
 
-static void FillRWInfo(const ProcessData* data, uint64_t dirBase, RWInfo* info, int* count, uint64_t local, uint64_t remote, size_t len)
-{
+static void FillRWInfo(const ProcessData* data, uint64_t dirBase, RWInfo* info, int* count, uint64_t local, uint64_t remote, size_t len) {
 	memset(info, 0, sizeof(RWInfo) * *count);
 	info[0].local = local;
 	info[0].remote = VTranslate(data, dirBase, remote);

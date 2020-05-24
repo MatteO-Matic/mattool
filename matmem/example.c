@@ -49,7 +49,7 @@ void init()
 			if (!strcmp(processList.list[i].name, "Calculator.exe")) {
 				WinModuleList list = GenerateModuleList(&ctx, processList.list + i);
 				fprintf(out, "Module List for %s:\nBASEADDR\tENTRY_POINT\tMOD_SIZE\tLOAD\tNAME\n", processList.list[i].name);
-				for (int o = 0; o < list.size; o++)
+				for (size_t o = 0; o < list.size; o++)
 					fprintf(out, "%.8lx\t%.8lx\t%.8lx\t%hx\t%s\n", list.list[o].baseAddress, list.list[o].entryPoint, list.list[o].sizeOfModule, list.list[o].loadCount, list.list[o].name);
 
 				FreeModuleList(list);
